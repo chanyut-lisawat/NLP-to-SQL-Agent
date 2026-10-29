@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from api.schemas import (
-    QueryRequest, QueryResponse, QueryError, ResultSummary,
+    QueryRequest, QueryResponse, QueryError, ResultSummary, AnswerAnalysis,
     SchemaResponse, TableInfo, ColumnInfo,
     HistoryResponse, HistoryItem,
     FavoritesResponse, FavoriteItem, CreateFavoriteRequest,
@@ -275,6 +275,8 @@ async def _agent_envelope(
             turn_digest=build_turn_digest(
                 result.sql, rows, result.columns, result.row_count,
                 load_table_notes(settings.DOMAIN_PROFILE)),
+            analysis=(AnswerAnalysis(**result.analysis)
+                      if result.analysis else None),
             columns=[ColumnInfo(**c) for c in (result.columns or [])],
             rows=rows, row_count=result.row_count, truncated=result.truncated,
             summary=ResultSummary(**(result.summary or {"row_count": result.row_count})),

@@ -161,6 +161,7 @@ of history.
 | `steps_used` | number | Agent loop steps used in this Turn; `1` on the legacy one-shot path. |
 | `prep_ms` | number \| null | Context-preparation time (retrieval + schema filtering) on agent Turns; `null` on the legacy path. Additive and advisory. |
 | `turn_digest` | object \| null | Deterministic description of a result Turn (tables, population, filters, grouping, columns, top rows). Populated on agent result Turns when available; `null` otherwise. Treat as **opaque** and pass it back as `history[].digest`. |
+| `analysis` | object \| null | Synthesis for a **cause / comparison / trend** Result Turn: `{ headline, findings[], caveats[] }`. `null` on plain count/listing Turns, clarifications and refusals. Additive — ignore it if unused. |
 | `sql` | string \| null | Generated SQL; `null` for clarification/refusal and errors without SQL. |
 | `columns` | array | Per-column `name`, `type`, `numeric`, `semantic_type`. |
 | `rows` | array \| null | Result rows; `null` on error, `[]` for clarification/refusal. |
@@ -171,6 +172,28 @@ of history.
 | `retry_count` | number | Self-correction retries on the legacy one-shot path; agent Turns report `0` here — use `steps_used` for loop effort. |
 | `elapsed_ms` | number | Total Turn time. |
 | `error` | object \| null | `{ code, message }` on a business failure. |
+
+#### `analysis`
+
+Present when the question asks for a cause, a comparison or a trend — even when a
+single grouped query carries every number — and the agent synthesises it. A plain
+count or listing has no analysis:
+
+```json
+{
+  "headline": "ความเสี่ยงหลักมาจากการขาดเรียนสะสม",
+  "findings": ["นักเรียนกลุ่ม HIGH ขาดเรียนเฉลี่ย 8 วัน", "กลุ่ม NORMAL เฉลี่ย 3 วัน"],
+  "caveats": ["ตาราง case_risk_signals ไม่มีข้อมูลกรุงเทพฯ"]
+}
+```
+
+`headline` is one sentence, `findings` are the statements the executed queries
+jointly support, and `caveats` name what the data cannot show. Every number in
+the analysis is checked against this Turn's own rows before the envelope is
+returned (ADR 0010); an unsupported figure is repaired or dropped. `sql`, `rows`
+and `visualization` still describe the **last** query of the Turn — when the
+agent analyses with several queries it is told to make that the table worth
+showing.
 
 #### `columns[]`
 
@@ -486,6 +509,11 @@ export type QueryEnvelope = {
   steps_used: number;
   prep_ms?: number | null;
   turn_digest?: Record<string, unknown> | null;
+  analysis?: {
+    headline: string | null;
+    findings: string[];
+    caveats: string[];
+  } | null;
   sql: string | null;
   columns: { name: string; type: string; numeric: boolean; semantic_type: SemanticType }[];
   rows: Record<string, unknown>[] | null;

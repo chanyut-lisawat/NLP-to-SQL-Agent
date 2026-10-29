@@ -9,13 +9,18 @@ Tools (ADR 0006 decision #6):
 - run_sql(sql)            — read-only; safety validation runs INSIDE the tool on
                             every candidate, so the loop can wander but the
                             datasource surface stays exactly as before
-- final_answer(answer_type, message) — delivers a Result, a Clarification, or a
-                            Refusal; ADR 0006 refusal-first: a result claim
-                            without an executed query is rejected by the tool
-                            itself, so clarify/refuse remain the only exits
+- plan(steps)             — this Turn's plan for a multi-query answer; once per
+                            Turn and not counted against the budget (ADR 0010 / #38)
+- final_answer(answer_type, message, analysis?) — delivers a Result, a
+                            Clarification, or a Refusal; a multi-query Result may
+                            carry an `analysis` (headline / findings / caveats).
+                            ADR 0006 refusal-first: a result claim without an
+                            executed query is rejected by the tool itself, so
+                            clarify/refuse remain the only exits
 
 Budget: 8 model steps per Turn; exhaustion is a hard STEP_BUDGET_EXCEEDED
-failure — never best-effort SQL (ADR 0006 decision #8).
+failure — never best-effort SQL (ADR 0006 decision #8). A `plan` call buys the
+Turn one extra step (once), so planning does not eat the answer's room.
 """
 
 import asyncio
@@ -55,6 +60,17 @@ STEP_BUDGET_EXCEEDED = "STEP_BUDGET_EXCEEDED"
 MAX_PROBES_AFTER_EMPTY = 2  # run_sql calls allowed after a successful 0-row query
 _DUPLICATE_PREFIX = "DUPLICATE_SQL"
 _EXPLORATION_PREFIX = "EXPLORATION_LIMIT"
+# ADR 0010 / ticket #38: a Turn may state a plan once; the plan step is refunded
+# from the budget so planning never costs the answer a step.
+MAX_PLAN_STEPS = 8
+MAX_ANALYSIS_REPAIRS = 2
+MAX_ANALYSIS_REQUIRED_REPAIRS = 1
+# A cause / comparison / trend question is answered best as a synthesis, even
+# when one query carries every number. Checked in code so the envelope field is
+# not left to the model's mood (ADR 0010 / #38).
+_ANALYSIS_QUESTION_RE = re.compile(
+    r"(สาเหตุ|ต้นเหตุ|เพราะอะไร|เพราะเหตุใด|ทำไม|ปัจจัย|เทียบ|เปรียบเทียบ|"
+    r"แตกต่าง|ต่างกัน|ต่างจาก|แนวโน้ม)")
 
 
 # A follow-up that only narrows the previous Turn ("ช่วยกรองเฉพาะ X", "เฉพาะ X",
@@ -80,6 +96,37 @@ def previous_turn_columns(question: str, history: Optional[list]) -> Optional[Li
 def _normalize_sql(sql: str) -> str:
     """Whitespace/case/trailing-semicolon-insensitive key for duplicate detection."""
     return " ".join((sql or "").strip().rstrip(";").split()).lower()
+
+
+def _normalize_analysis(raw: Any) -> Optional[dict]:
+    """The model's `analysis` argument as the envelope's shape, or None.
+
+    Tolerant on input (a single finding may arrive as a string) and strict on
+    output: only non-empty strings survive, because every entry is rendered
+    verbatim by a Consumer. Pure; never raises.
+    """
+    if not isinstance(raw, dict):
+        return None
+
+    def _text(value) -> str:
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            return ""
+        return " ".join(str(value).split())
+
+    def _list(value) -> List[str]:
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+        return [t for t in (_text(v) for v in value) if t]
+
+    headline = _text(raw.get("headline")) or None
+    findings = _list(raw.get("findings"))
+    caveats = _list(raw.get("caveats"))
+    if not (headline or findings or caveats):
+        return None
+    return {"headline": headline, "findings": findings, "caveats": caveats}
+
 
 ANSWER_TYPES = ("result", "clarification", "refusal")
 
@@ -107,6 +154,10 @@ using tools — you do not answer from memory.
 ### Tools:
 - get_schema(table_name): full column list for one table. Use when unsure \
 about columns or join paths.
+- plan(steps): write this Turn's short plan before a multi-query answer — a list \
+of short strings, one per step. Call it ONCE, as your first tool call, when the \
+question asks why, compares groups, or follows a trend and needs 2–4 queries. It \
+is not counted against the step budget.
 - describe_table(table_name): what the table MEANS and which population its rows \
 cover (e.g. only opened cases vs all assessed students), key columns and join \
 paths. Use it when unsure which table answers a question — especially "why / \
@@ -117,15 +168,24 @@ before you filter on it. Personal-data columns are refused.
 - run_sql(sql): executes a READ-ONLY SELECT (WITH ... SELECT allowed) against \
 the datasource. Safety validation runs inside the tool — write operations and \
 forbidden tables are rejected and the reason is returned to you. A LIMIT of at \
-most {max_limit} is enforced automatically.
-- final_answer(answer_type, message): end the Turn. answer_type is one of:
+most {max_limit} is enforced automatically. The LAST run_sql of a Turn is the \
+rows the Consumer displays — when you analyse with several queries, make the \
+last one the table worth showing.
+- final_answer(answer_type, message, analysis?): end the Turn. answer_type is one of:
   * "result" — a query already executed successfully this Turn; message is
 a short Thai paragraph (2–3 sentences) that: (1) answers the question in
 words, including any "why/why-not" part when the rows support it (e.g. the
 top entity and what stands out about it), (2) notes one salient fact from
 the result (largest/smallest/total), and (3) stays strictly inside what the
 rows show — never invent a reason the data does not contain. The Consumer
-displays this message as a chat bubble next to the table/chart.
+displays this message as a chat bubble next to the table/chart. When the
+question asks why, compares groups, or follows a trend — even when one query
+answers it — you MUST also pass `analysis` = {{headline, findings[],
+caveats[]}}: one headline sentence, the compare/synthesise findings, and
+caveats naming what the data cannot show (a table with no rows for the
+requested province, a measure another table does not carry). Every number in
+the message and the analysis must come from this Turn's rows. Omit `analysis`
+for a plain count or listing.
   * "clarification" — the question is ambiguous (missing measure, population \
 snapshot, timeframe, or grouping); message asks ONE concrete follow-up \
 question (Thai). When a genuine choice is unresolved, ask — never guess.
@@ -166,6 +226,13 @@ include that entity's readable label column (its name) next to the \
 measures — never the id alone; select the id only when the user asks for \
 the code itself. The label column is never a person's name — person \
 identifiers stay out of results per rule 2.
+8. Why / comparison / trend questions need more than one side: call plan once, \
+then run 1–4 queries that carry every side of the comparison (e.g. HIGH vs \
+NORMAL students, or the table the question names vs the table that actually \
+carries the measure) — a grouped query counts, a lone tier does not — then \
+final_answer with `analysis`. State in caveats what the ran queries cannot \
+show (e.g. one table has no rows for the requested province). Never assert a \
+cause from a single count.
 """
 
 
@@ -186,6 +253,8 @@ class AgentTurnResult:
     prep_ms: Optional[int] = None  # context-preparation duration (spec #27 / #31)
     error: Optional[str] = None  # error code, e.g. STEP_BUDGET_EXCEEDED
     error_message: Optional[str] = None
+    # ADR 0010 / #38: optional synthesis for a multi-query Result Turn.
+    analysis: Optional[dict] = None
 
 
 def _history_block(history: Optional[list]) -> str:
@@ -263,6 +332,27 @@ AGENT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "plan",
+            "description": ("Write this Turn's short plan before a multi-query "
+                            "answer (why / comparison / trend). Call ONCE as the "
+                            "first tool call; not counted against the step "
+                            "budget."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Short steps, one per query plus the synthesis",
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_sql",
             "description": ("Execute a READ-ONLY SELECT against the datasource. "
                             "Safety validation runs inside the tool — writes and "
@@ -293,6 +383,22 @@ AGENT_TOOLS = [
                                     "enum": ["result", "clarification", "refusal"]},
                     "message": {"type": "string",
                                 "description": "The user-facing message (Thai)"},
+                    "analysis": {
+                        "type": "object",
+                        "description": ("For a multi-query result: synthesise the "
+                                        "findings and state the data's limits. "
+                                        "Every number must come from this "
+                                        "Turn's rows."),
+                        "properties": {
+                            "headline": {"type": "string",
+                                         "description": "One sentence answer"},
+                            "findings": {"type": "array", "items": {"type": "string"},
+                                         "description": "2-5 supported findings"},
+                            "caveats": {"type": "array", "items": {"type": "string"},
+                                        "description": ("What the ran queries cannot "
+                                                        "show")},
+                        },
+                    },
                     "executed_question": {"type": "string",
                                           "description": ("For result answers: the "
                                                           "self-contained question the "
@@ -328,6 +434,11 @@ class _AgentSession:
         self.required_columns: Optional[List[str]] = None
         self.shape_repairs: int = 0
         self.table_notes: dict = load_table_notes(settings.DOMAIN_PROFILE)
+        self.plan_steps: List[str] = []
+        self.plan_accepted: bool = False
+        self.plan_refunded: bool = False
+        self.analysis_repairs: int = 0
+        self.analysis_required_repairs: int = 0
 
     # --- tool: get_schema -----------------------------------------------------
     async def tool_get_schema(self, table_name: str) -> str:
@@ -386,6 +497,28 @@ class _AgentSession:
                            "values": vals[:SAMPLE_LIMIT],
                            "more_values_exist": len(vals) > SAMPLE_LIMIT},
                           ensure_ascii=False, default=str)
+
+    # --- tool: plan (ADR 0010 / ticket #38) -----------------------------------
+    async def tool_plan(self, steps) -> str:
+        """Record this Turn's plan. Once per Turn; a second call is refused."""
+        if self.plan_accepted:
+            return ("PLAN_ALREADY_SET: this Turn already has a plan. Do not plan "
+                    "again — run the next query in it, or call final_answer.")
+        if isinstance(steps, str):
+            steps = [steps]
+        if not isinstance(steps, list):
+            return "ERROR: plan(steps) takes a list of short step strings."
+        cleaned = [" ".join(str(s).split()) for s in steps
+                   if s is not None and str(s).strip()]
+        if not cleaned:
+            return "ERROR: plan(steps) needs at least one non-empty step."
+        self.plan_steps = cleaned[:MAX_PLAN_STEPS]
+        self.plan_accepted = True
+        return json.dumps(
+            {"ok": True, "plan": self.plan_steps,
+             "note": ("Plan recorded. Run the queries in it, then call "
+                      "final_answer with analysis.")},
+            ensure_ascii=False)
 
     # --- tool: run_sql --------------------------------------------------------
     async def tool_run_sql(self, sql: str) -> str:
@@ -488,6 +621,50 @@ class _AgentSession:
     def grounded_fallback(self, message: str, history) -> str:
         kept = drop_ungrounded_sentences(message, self._shown_rows(), self._user_text(history))
         return kept or fallback_message(len(self.executed_rows or []))
+
+    # --- analysis grounding (ADR 0010 / ticket #38) ---------------------------
+    def _analysis_strings(self, analysis: dict) -> List[str]:
+        parts = [analysis.get("headline") or ""]
+        parts += analysis.get("findings") or []
+        parts += analysis.get("caveats") or []
+        return [p for p in parts if p]
+
+    def ground_analysis(self, analysis: dict, history) -> Optional[str]:
+        """None when every number in the analysis is grounded in this Turn.
+
+        An analysis may quote ANY query of the Turn — that is the point of a
+        multi-query answer — so it is checked against all of them, not only the
+        rows the Consumer displays (ticket #36's rule still applies to each
+        finding; its shown-rows scope does not, because the synthesis is the
+        output here).
+        """
+        user_text = self._user_text(history)
+        bad: List[float] = []
+        for text in self._analysis_strings(analysis):
+            bad.extend(ungrounded_numbers(text, self.turn_rows, user_text))
+        if not bad:
+            return None
+        shown = ", ".join(f"{b:g}" for b in sorted(set(bad))[:6])
+        return (f"ERROR: the analysis states numbers that no query in this Turn "
+                f"returned: {shown}. A finding may only use figures from this "
+                f"Turn's results (or the user's own words); a comparison must be "
+                f"supported by the queries you actually ran. Rewrite the analysis "
+                f"or run the missing query, then call final_answer again.")
+
+    def cleaned_analysis(self, analysis: dict, history) -> Optional[dict]:
+        """Deterministic last resort: drop every ungrounded sentence; None when
+        nothing grounded survives."""
+        user_text = self._user_text(history)
+
+        def _keep(text: str) -> str:
+            return drop_ungrounded_sentences(text, self.turn_rows, user_text)
+
+        headline = _keep(analysis.get("headline") or "") or None
+        findings = [t for t in (_keep(f) for f in analysis.get("findings") or []) if t]
+        caveats = [t for t in (_keep(c) for c in analysis.get("caveats") or []) if t]
+        if not (headline or findings or caveats):
+            return None
+        return {"headline": headline, "findings": findings, "caveats": caveats}
 
     # --- tool: final_answer ---------------------------------------------------
     async def tool_final_answer(self, answer_type: str, message: str = "") -> str:
@@ -602,7 +779,8 @@ async def run_agent_turn(
     # until the budget is gone.)
     tool_llm = llm.bind_tools(AGENT_TOOLS)
     steps = 0
-    while steps < AGENT_STEP_BUDGET:
+    budget = AGENT_STEP_BUDGET
+    while steps < budget:
         steps += 1
         try:
             ai_msg = await tool_llm.ainvoke(messages)
@@ -618,7 +796,8 @@ async def run_agent_turn(
             messages.append({"role": "assistant", "content": str(getattr(ai_msg, "content", ""))})
             messages.append({"role": "system", "content":
                              "Respond with a tool call (get_schema, describe_table, "
-                             "sample_values, run_sql, or final_answer) — not with prose."})
+                             "sample_values, plan, run_sql, or final_answer) — not "
+                             "with prose."})
             continue
 
         messages.append({
@@ -648,6 +827,14 @@ async def run_agent_turn(
                     emit("tool", tool="sample_values")
                     out = await session.tool_sample_values(
                         args.get("table_name", ""), args.get("column_name", ""))
+                elif name == "plan":
+                    emit("tool", tool="plan")
+                    out = await session.tool_plan(args.get("steps"))
+                    if session.plan_accepted and not session.plan_refunded:
+                        # ADR 0010 / #38: planning is free — the Turn gets the
+                        # step back once, so a 3-query answer still fits.
+                        session.plan_refunded = True
+                        budget += 1
                 elif name == "run_sql":
                     emit("sql_planned", sql=args.get("sql", ""))
                     out = await session.tool_run_sql(args.get("sql", ""))
@@ -676,13 +863,41 @@ async def run_agent_turn(
                         elif repair:
                             args["message"] = session.grounded_fallback(
                                 args.get("message", ""), history)
+                    analysis = _normalize_analysis(args.get("analysis"))
+                    if (out == "OK" and args.get("answer_type") == "result"
+                            and analysis is None
+                            and _ANALYSIS_QUESTION_RE.search(question or "")
+                            and session.analysis_required_repairs < MAX_ANALYSIS_REQUIRED_REPAIRS):
+                        # Answered a cause/comparison with no synthesis: ask once
+                        # for it; a second attempt is accepted regardless, so a
+                        # stubborn model can never kill the Turn.
+                        session.analysis_required_repairs += 1
+                        out = ("ERROR: this question asks for a cause, a comparison "
+                               "or a trend, but the result carries no `analysis`. "
+                               "Call final_answer again with `analysis` = "
+                               "{headline, findings[], caveats[]}: the comparison "
+                               "the rows support and what the data cannot show. "
+                               "Keep the message a short paragraph.")
+                    if out == "OK" and args.get("answer_type") == "result" and analysis:
+                        # Ticket #36 applies to every finding: a synthesis may
+                        # quote any query of this Turn, but nothing it did not run.
+                        repair = session.ground_analysis(analysis, history)
+                        if repair and session.analysis_repairs < MAX_ANALYSIS_REPAIRS:
+                            session.analysis_repairs += 1
+                            out = repair
+                        elif repair:
+                            analysis = session.cleaned_analysis(analysis, history)
+                    if out == "OK" and args.get("answer_type") == "result":
+                        args["analysis"] = analysis
+                    else:
+                        args.pop("analysis", None)
                     if out == "OK":
                         done = _build_final(session, args, bundle,
                                             preferred_chart_type, steps)
                         done.prep_ms = prep_ms
                 else:
-                    out = (f"ERROR: unknown tool '{name}'. "
-                           f"Available tools: get_schema, describe_table, sample_values, "
+                    out = (f"ERROR: unknown tool '{name}'. Available tools: "
+                           f"get_schema, describe_table, sample_values, plan, "
                            f"run_sql, final_answer.")
             except Exception as e:
                 # A tool crash must be readable by the model, never fatal to the
@@ -695,7 +910,7 @@ async def run_agent_turn(
             })
 
         messages.extend(tool_outputs)
-        if done is None and AGENT_STEP_BUDGET > 3 and steps == AGENT_STEP_BUDGET - 2:
+        if done is None and budget > 3 and steps == budget - 2:
             messages.append({"role": "system", "content":
                              "Only 2 steps remain in this Turn. Do not explore "
                              "further: call final_answer now with what the data "
@@ -709,7 +924,7 @@ async def run_agent_turn(
     emit("turn_done", answer_type="error", error=STEP_BUDGET_EXCEEDED)
     return AgentTurnResult(
         error=STEP_BUDGET_EXCEEDED,
-        error_message=(f"Agent exceeded its {AGENT_STEP_BUDGET}-step budget "
+        error_message=(f"Agent exceeded its {budget}-step budget "
                        f"without a final answer."),
         steps_used=steps,
         prep_ms=prep_ms,
@@ -722,7 +937,8 @@ def _build_final(session, args, bundle, preferred_chart_type, steps) -> AgentTur
     message = (args.get("message") or "").strip() or None
     result = AgentTurnResult(answer_type=answer_type, message=message,
                              steps_used=steps,
-                             rag_examples_count=bundle.rag_count)
+                             rag_examples_count=bundle.rag_count,
+                             analysis=args.get("analysis"))
     if answer_type == "result":
         result.sql = session.executed_sql
         result.rows = session.executed_rows

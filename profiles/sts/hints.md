@@ -49,6 +49,15 @@ The full scope-enforcement / PII gateway in the guide is out of scope here
   present tense ("ครูที่สอน", "วิชาที่เปิด", "ห้องปัจจุบัน"). Do not let a current-status filter erase a
   historical fact.
 
+### Cause / comparison questions ("สาเหตุของความเสี่ยง...")
+- "สาเหตุ" of a risk tier is a **comparison against the baseline**: show the asked
+  tier next to `NORMAL` for the same drivers — `attendance_rate_percent < 80`,
+  `consecutive_absent_days >= 3`, `term_absent_days >= 7`, `late_count > 0` — plus
+  each tier's average attendance. One tier's counts alone do not show what differs.
+- `case_risk_signals` records reasons only for **opened cases** (~11 signals across
+  ~7 cases), not a per-province census. If it returns 0 rows for a province, say the
+  signal table has no rows there — never that the risk does not exist.
+
 ### Canonical join paths (use these FKs; do not guess joins from similar-looking names)
 ```
 schools.id

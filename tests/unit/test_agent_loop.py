@@ -126,8 +126,8 @@ def _ai_tool(name, **args):
     return AIMessage(content="", tool_calls=[{"name": name, "args": args, "id": "c"}])
 
 
-def _ai_final(answer_type, message=""):
-    return _ai_tool("final_answer", answer_type=answer_type, message=message)
+def _ai_final(answer_type, message="", **extra):
+    return _ai_tool("final_answer", answer_type=answer_type, message=message, **extra)
 
 
 class AgentLoopBase(unittest.TestCase):
@@ -411,6 +411,147 @@ class TestDataKnowledgeTools(AgentLoopBase):
         self.assertTrue(any("no successful run_sql" in o for o in self._tool_outputs()))
 
 
+class TestPlanAndAnalysis(AgentLoopBase):
+    """Ticket #38 / ADR 0010: plan once per Turn (refunded from the budget)
+    and the optional multi-query `analysis` on a Result."""
+
+    def _ask(self, script, question="สาเหตุของความเสี่ยงในกรุงเทพฯ"):
+        self._wire(script)
+        return client.post("/api/query",
+                           json={"question": question, "history": HISTORY},
+                           headers={"X-API-Key": "test-secret"}).json()
+
+    def _tool_outputs(self):
+        return [m["content"] for m in self.llm.prompts[-1]
+                if isinstance(m, dict) and m.get("role") == "tool"]
+
+    def test_plan_is_bound_and_documented(self):
+        self._ask([_ai_final("clarification", "ขอรายละเอียด")])
+        names = [t["function"]["name"] for t in self.llm.bound_tools]
+        self.assertIn("plan", names)
+        self.assertIn("plan(steps)", self.llm.prompts[0][0]["content"])
+        self.assertIn("analysis", json.dumps(agent.AGENT_TOOLS, ensure_ascii=False))
+
+    def test_plan_is_recorded_and_refunded_from_the_budget(self):
+        # 9 model steps against an 8-step budget: only the plan refund fits.
+        script = [_ai_tool("plan", steps=["นับ HIGH", "นับ NORMAL", "สรุป"])]
+        script += [_ai_tool("get_schema", table_name="schools")] * 6
+        script += [_ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+                   _ai_final("result", "มี 1 โรงเรียน", analysis={
+                       "headline": "พบ 1 โรงเรียน", "findings": [], "caveats": []})]
+        body = self._ask(script)
+        self.assertIsNone(body["error"])
+        self.assertEqual(body["steps_used"], 9)
+        self.assertIn("Plan recorded", self._tool_outputs()[0])
+
+    def test_second_plan_is_refused(self):
+        body = self._ask([
+            _ai_tool("plan", steps=["นับ HIGH"]),
+            _ai_tool("plan", steps=["นับ NORMAL"]),
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "พบ 1 โรงเรียน", "findings": [], "caveats": []}),
+        ])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertTrue(any(o.startswith("PLAN_ALREADY_SET")
+                            for o in self._tool_outputs()))
+
+    def test_analysis_carries_headline_findings_and_caveats(self):
+        body = self._ask([
+            _ai_tool("plan", steps=["นับ HIGH", "นับ NORMAL", "สรุป"]),
+            _ai_tool("run_sql", sql="SELECT 7 AS high_students FROM schools"),
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "ความเสี่ยงหลักมาจากการขาดเรียน 7 ครั้ง",
+                "findings": ["นักเรียนกลุ่ม HIGH ขาดเรียน 7 ครั้ง"],
+                "caveats": ["ตาราง case signals ไม่มีข้อมูลกรุงเทพฯ"],
+            }),
+        ])
+        analysis = body["analysis"]
+        self.assertEqual(analysis["headline"], "ความเสี่ยงหลักมาจากการขาดเรียน 7 ครั้ง")
+        self.assertEqual(analysis["findings"], ["นักเรียนกลุ่ม HIGH ขาดเรียน 7 ครั้ง"])
+        self.assertEqual(analysis["caveats"], ["ตาราง case signals ไม่มีข้อมูลกรุงเทพฯ"])
+
+    def test_analysis_may_quote_an_earlier_query_of_the_same_turn(self):
+        # The displayed rows (1 school) do not hold 7, but the Turn's first
+        # query does: a synthesis is allowed to compare both.
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT 7 AS high_students FROM schools"),
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "เทียบ HIGH 7 คน", "findings": [], "caveats": []}),
+        ])
+        self.assertEqual(body["analysis"]["headline"], "เทียบ HIGH 7 คน")
+        self.assertEqual(body["steps_used"], 3)
+
+    def test_ungrounded_finding_triggers_one_repair_step(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "พบ 76 โรงเรียน", "findings": ["เสี่ยง 76 แห่ง"],
+                "caveats": []}),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "พบ 1 โรงเรียน", "findings": [], "caveats": []}),
+        ])
+        self.assertEqual(body["analysis"]["headline"], "พบ 1 โรงเรียน")
+        self.assertEqual(body["steps_used"], 3)
+        errs = [o for o in self._tool_outputs() if "no query in this Turn" in o]
+        self.assertEqual(len(errs), 1)
+        self.assertIn("76", errs[0])
+
+    def test_analysis_keeps_only_its_grounded_parts_after_two_repairs(self):
+        bad = {"headline": "พบ 1 โรงเรียน",
+               "findings": ["เสี่ยง 76 แห่ง"], "caveats": []}
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis=bad),
+            _ai_final("result", "มี 1 โรงเรียน", analysis=bad),
+            _ai_final("result", "มี 1 โรงเรียน", analysis=bad),
+        ])
+        self.assertEqual(body["analysis"]["headline"], "พบ 1 โรงเรียน")
+        self.assertEqual(body["analysis"]["findings"], [])
+
+    def test_cause_question_without_analysis_is_asked_once(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+        ])
+        self.assertEqual(body["answer_type"], "result")
+        self.assertEqual(body["steps_used"], 3)
+        errs = [o for o in self._tool_outputs() if "asks for a cause" in o]
+        self.assertEqual(len(errs), 1)
+
+    def test_cause_question_accepts_analysis_on_the_next_attempt(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+            _ai_final("result", "มี 1 โรงเรียน", analysis={
+                "headline": "พบโรงเรียน 1 แห่ง", "findings": [], "caveats": []}),
+        ])
+        self.assertEqual(body["analysis"]["headline"], "พบโรงเรียน 1 แห่ง")
+        self.assertEqual(body["steps_used"], 3)
+
+    def test_plain_count_question_needs_no_analysis(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+        ], question="จำนวนโรงเรียนทั้งหมด")
+        self.assertEqual(body["answer_type"], "result")
+        self.assertIsNone(body.get("analysis"))
+        self.assertEqual(body["steps_used"], 2)
+
+    def test_analysis_is_absent_by_default_and_ignored_for_non_results(self):
+        body = self._ask([
+            _ai_tool("run_sql", sql="SELECT id, name FROM schools"),
+            _ai_final("result", "มี 1 โรงเรียน"),
+        ], question="จำนวนโรงเรียนทั้งหมด")
+        self.assertIsNone(body.get("analysis"))
+        body = self._ask([_ai_final("clarification", "ขอช่วงเวลาครับ", analysis={
+            "headline": "x"})])
+        self.assertIsNone(body.get("analysis"))
+
+
 class TestDigestInEnvelope(AgentLoopBase):
     def test_result_envelope_carries_turn_digest_and_clarification_does_not(self):
         self._wire([_ai_tool("run_sql", sql="SELECT id, name FROM schools WHERE id = 1"),
@@ -610,7 +751,7 @@ class TestToolBinding(unittest.TestCase):
         self.assertIsNotNone(tools, "loop must bind the tool spec to the LLM")
         names = {t["function"]["name"] for t in tools}
         self.assertEqual(names, {"get_schema", "describe_table", "sample_values",
-                                 "run_sql", "final_answer"})
+                                 "plan", "run_sql", "final_answer"})
 
     def test_system_prompt_classifies_before_writing_sql(self):
         """Regression (post-#21 eval): clarify 0/4 and one PII denial hunted to

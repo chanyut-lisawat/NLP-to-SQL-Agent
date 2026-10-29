@@ -75,6 +75,18 @@ class ResultSummary(BaseModel):
     numeric_aggregates: Dict[str, Dict[str, float]] = {}
     single_value: bool = False  # 1 row x 1 numeric column
 
+class AnswerAnalysis(BaseModel):
+    """Multi-query synthesis attached to a Result Turn (ADR 0010 / #38).
+
+    Optional and additive: a Consumer that ignores it renders the Result
+    exactly as before. Every number in it is grounded in the Turn's own rows
+    by the agent loop before the envelope is built.
+    """
+    headline: Optional[str] = None
+    findings: List[str] = []
+    caveats: List[str] = []  # what the executed queries cannot show
+
+
 class QueryError(BaseModel):
     code: Literal[ERROR_CODES]  # LLM_FAILED | SQL_INVALID | EXEC_FAILED | STEP_BUDGET_EXCEEDED
     message: str
@@ -105,6 +117,10 @@ class QueryResponse(BaseModel):
     # grouping, top rows) for the Consumer to replay in `history` (ADR 0010 / #34).
     # Additive and advisory: Consumers that ignore it lose nothing.
     turn_digest: Optional[Dict[str, Any]] = None
+    # Synthesis for a multi-query Result Turn (ADR 0010 / #38): headline,
+    # findings and the data's caveats. null on single-query Turns and on
+    # clarification/refusal. Additive — legacy Consumers unaffected.
+    analysis: Optional[AnswerAnalysis] = None
     sql: Optional[str] = None
     columns: List[ColumnInfo] = []
     rows: Optional[List[Dict[str, Any]]] = None

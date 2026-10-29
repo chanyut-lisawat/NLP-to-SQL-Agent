@@ -47,7 +47,19 @@ A small digest of one result the service computes from the returned rows: the to
 row count, whether the row cap truncated the set, and for each numeric column its
 sum / min / max / mean. When a result is a single row with a single numeric column,
 it is also flagged as a **single-value answer** so a Consumer can headline the number
-instead of drawing a one-cell table.### Question
+instead of drawing a one-cell table.
+
+### Analysis
+The optional synthesis attached to a cause / comparison / trend Result (often but not
+always a multi-query one): a one-sentence **headline**, the **findings** the executed
+queries jointly support, and the **caveats** naming what the data cannot show (a table
+with no rows for the requested province, a measure another table does not carry). Its
+numbers are grounded in the Turn's own rows by the agent loop, not by a second model
+call. Advisory and additive: a Consumer that ignores it renders the Result exactly as
+before, and `sql` / `rows` / visualization config still describe the last query of the
+Turn (ADR 0010).
+
+### Question
 A single natural-language request from an end user, expressed in Thai, asked within one
 Turn of a Session. A Question may rely on earlier Turns of the same Session — follow-ups
 and references such as "โรงเรียนเดียวกัน" — and is interpreted with that context.
