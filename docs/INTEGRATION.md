@@ -111,6 +111,13 @@ interface QueryEnvelope {
   elapsed_ms: number;
   prep_ms?: number | null;         // ใหม่ (additive, spec #27): เวลา "เตรียมบริบท" ของ Turn นั้น (retrieval + schema filtering) หน่วย ms —
                                    // elapsed_ms − prep_ms ≈ ราคาโครงสร้างของ LLM steps (~5s/step) ใช้ log/วิเคราะห์ latency
+  turn_digest?: Record<string, unknown> | null;  // ADR 0010 / #34 — คำอธิบาย deterministic ของ Turn นี้;
+                                   // เก็บแล้วส่งกลับเป็น history[].digest (opaque — ห้ามแก้)
+  analysis?: {                     // ADR 0010 / #38 — เฉพาะคำถามสาเหตุ/เปรียบเทียบ/แนวโน้ม
+    headline: string | null;       //   1 ประโยคสรุป
+    findings: string[];            //   ข้อสรุปที่ query ทั้งหมดของ Turn นี้รองรับร่วมกัน
+    caveats: string[];             //   ข้อจำกัดของข้อมูล — สิ่งที่ query เหล่านี้ "บอกไม่ได้"
+  } | null;
   error: { code: string; message: string } | null;
 }
 ```
@@ -124,6 +131,21 @@ ADR 0006 decision #8) · *(PDPA phase จะเพิ่ม `PII_BLOCKED`)*
 > **Field `prep_ms` (additive, spec #27/#31):** ปรากฏใน envelope ทั้ง `/api/query` และ event สุดท้ายของ
 > `/api/query/stream` (ค่าเดียวกัน) — อาจเป็น `null` บน legacy path ที่ไม่มี agent loop ตามกติกาของเอกสารนี้
 > Consumer ต้อง**เมิน field ที่ไม่รู้จัก** จึงไม่ต้องแก้อะไร: field นี้ไว้อ่าน/log อย่างเดียว ห้ามใช้ตัดสิน logic
+
+> **Field `turn_digest` (additive, ADR 0010 / #34):** คำอธิบาย deterministic ของ result Turn
+> (ตาราง/ประชากร/เงื่อนไขกรอง/การจัดกลุ่ม/คอลัมน์/top rows — ไม่มี LLM ไม่มีข้อมูลส่วนบุคคล) เก็บคู่กับ
+> envelope แล้วส่งกลับใน `history[].digest` ตรง ๆ ดู §1.1
+
+> **Field `analysis` (additive, ADR 0010 / #38):** มีเมื่อคำถามเป็น **สาเหตุ / เปรียบเทียบ / แนวโน้ม**
+> และ agent รวบคำตอบจาก query หลายตัว (หรือ query เดียวที่ครบทุกตัวเลข) — `null` บนคำถามนับ/ลิสต์,
+> clarification และ refusal. ทุกตัวเลขใน `analysis` ถูกตรวจกับ rows ของ Turn นี้ก่อนสร้าง envelope
+> (ADR 0010) — ทุก field เป็น `string`/`string[]` ไม่มีตัวเลขที่ต้อง format
+> — **`caveats` ห้ามทิ้ง**: มันคือส่วนที่บอกว่าข้อมูลบอกอะไรไม่ได้ (เช่น ตารางหนึ่งไม่มีข้อมูลจังหวัดนั้น)
+> และเป็นเหตุผลที่ผลอาจว่างหรือดูขัดกับ `message`
+>
+> การแสดงผลที่แนะนำ (demo UI ทำแบบนี้ — §5.2): วางใต้ `message` เป็นบล็อกที่ 2
+> — `headline` ตัวหนา, `findings` เป็น bullet, `caveats` เป็นกรอบเตือน (⚠️) แยกออกมา
+> เพื่อไม่ให้อ่านเป็น footnote; แสดงแม้ `row_count` = 0
 
 ### 1.1 Request — การสนทนาต่อเนื่อง (history, ADR 0006)
 
@@ -465,6 +487,7 @@ class PriorTurnDto {
   @IsIn(['result', 'clarification', 'refusal']) answerType: 'result' | 'clarification' | 'refusal';
   @IsOptional() @IsString() sql?: string | null;
   @IsOptional() @IsInt() @Min(0) rowCount?: number | null;
+  @IsOptional() @IsObject() digest?: Record<string, unknown> | null;   // ADR 0010 / #34 — opaque
 }
 ```
 
@@ -524,6 +547,7 @@ async query(dto: NlQueryDto, user: AuthenticatedRequestUser): Promise<QueryEnvel
             answer_type: t.answerType,
             sql: t.sql ?? null,
             row_count: t.rowCount ?? null,
+            digest: t.digest ?? null,   // ADR 0010 / #34 — ส่งกลับตรง ๆ ไม่แก้
           })),
         }),
         signal: ac.signal,
@@ -681,12 +705,13 @@ function useNlQuery() {
     try {
       const envelope = await askNlQuery(question, turns, chart);
       setTurnsLog((log) => [...log, { question, envelope }]);
-      // สะสม Turn: result เอา sql+row_count จาก envelope, clarify/refuse ใส่ sql: null
+      // สะสม Turn: result เอา sql+row_count+turn_digest จาก envelope, clarify/refuse ใส่ sql: null
       setTurns((prev) => [...prev, {
         question,
         answerType: envelope.answer_type,
         sql: envelope.answer_type === 'result' ? envelope.sql : null,
         rowCount: envelope.row_count,
+        digest: envelope.turn_digest ?? null,   // ADR 0010 / #34 — opaque, ส่งกลับทั้งก้อน
       }]);
       return envelope;
     } catch (e) { setError((e as Error).message); return null; }
@@ -696,6 +721,15 @@ function useNlQuery() {
   const reset = useCallback(() => { setTurns([]); setTurnsLog([]); setError(null); }, []);
   return { ask, turnsLog, loading, error, reset };
 }
+
+// session.ts — UiTurn ต้องมี digest ด้วย ไม่งั้น setTurns ข้างบนไม่ผ่าน typecheck
+type UiTurn = {
+  question: string;
+  answerType: 'result' | 'clarification' | 'refusal';
+  sql: string | null;
+  rowCount: number;
+  digest?: Record<string, unknown> | null;   // ADR 0010 / #34 — เก็บ envelope.turn_digest ตรง ๆ
+};
 ```
 
 ### 3.4 `format.ts` — reference implementation (คัดลอกได้เลย)
@@ -761,6 +795,7 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
 
 ```
 <div class="nlq-card">
+  ถ้ามี analysis → <AnalysisBlock analysis={envelope.analysis} />  // ใต้ message bubble: headline + findings + caveats
   ถ้า rows ว่าง → <p>ไม่พบข้อมูล</p>
   <SummaryBar>   จำนวนแถว · [Σ / เฉลี่ย ของ 1 คอลัมน์ numeric] · ⚠️ ถ้า truncated
                  [📋 CSV] [📋 MD]
@@ -773,6 +808,34 @@ export function toMarkdown(rows: Record<string, unknown>[]): string {
   <ResultChart>  /  <ResultTable>
 </div>
 ```
+
+`<AnalysisBlock>` (ADR 0010 / #38) — แสดงเฉพาะเมื่อ `envelope.analysis` ไม่ใช่ `null`:
+
+```tsx
+function AnalysisBlock({ analysis }: { analysis: NonNullable<QueryEnvelope['analysis']> }) {
+  if (!analysis.headline && !analysis.findings.length && !analysis.caveats.length) return null;
+  return (
+    <section className="nlq-analysis">
+      {analysis.headline && <p className="nlq-analysis-headline">{analysis.headline}</p>}
+      {analysis.findings.length > 0 && (
+        <ul className="nlq-analysis-findings">
+          {analysis.findings.map((f, i) => <li key={i}>{f}</li>)}
+        </ul>
+      )}
+      {analysis.caveats.length > 0 && (
+        <div className="nlq-analysis-caveats">
+          <strong>⚠️ ข้อจำกัดของข้อมูล</strong>
+          <ul>{analysis.caveats.map((c, i) => <li key={i}>{c}</li>)}</ul>
+        </div>
+      )}
+    </section>
+  );
+}
+// JSX escape ให้เอง — ข้อความใน analysis มาจากโมเดล ห้ามใช้ dangerouslySetInnerHTML
+```
+
+วาง `<AnalysisBlock>` **ก่อน** summary bar/ตาราง และแสดงแม้ `row_count` = 0 — caveat
+มักเป็นคำอธิบายว่าทำไมผลจึงว่าง
 
 ### 3.6 `ResultTable.tsx`
 
@@ -996,6 +1059,7 @@ global + DOM API ตรง ๆ (เดิมเป็น Chart.js; เปลี�
 Frontend AI port ตามนี้:
 
 - `renderResult(env)` → `<QueryResult envelope={env} />` (React component)
+- `buildAnalysis(analysis)` → `<AnalysisBlock analysis={env.analysis} />` — layer 2 ของคำตอบ (§3.5)
 - `buildTable` → `<ResultTable rows columns />`, `buildTabs` + `renderChart` → `<ResultChart />`
 - global `echarts` → `echarts-for-react` (`<ReactECharts option={…} />`)
   หรือ `echarts.init` ผ่าน `ref`
@@ -1267,6 +1331,51 @@ function pngButton(chartId, title) {
         a.click();
     });
     return btn;
+}
+
+/**
+ * Analysis block (ADR 0010 / #38): headline + findings + caveats, appended
+ * under the message bubble and before the SQL. Text is model output → always
+ * textContent (React: JSX escapes; never dangerouslySetInnerHTML).
+ */
+function buildAnalysis(analysis) {
+    const card = document.createElement('div');
+    card.className = 'analysis-card';
+    if (analysis.headline) {
+        const h = document.createElement('div');
+        h.className = 'analysis-headline';
+        h.textContent = analysis.headline;
+        card.appendChild(h);
+    }
+    const findings = analysis.findings || [];
+    if (findings.length) {
+        const ul = document.createElement('ul');
+        ul.className = 'analysis-findings';
+        for (const f of findings) {
+            const li = document.createElement('li');
+            li.textContent = f;
+            ul.appendChild(li);
+        }
+        card.appendChild(ul);
+    }
+    const caveats = analysis.caveats || [];
+    if (caveats.length) {              // ห้ามทิ้ง: caveat = สิ่งที่ข้อมูลบอกไม่ได้
+        const box = document.createElement('div');
+        box.className = 'analysis-caveats';
+        const title = document.createElement('div');
+        title.className = 'analysis-caveats-title';
+        title.textContent = '⚠️ ข้อจำกัดของข้อมูล';
+        box.appendChild(title);
+        const ul = document.createElement('ul');
+        for (const c of caveats) {
+            const li = document.createElement('li');
+            li.textContent = c;
+            ul.appendChild(li);
+        }
+        box.appendChild(ul);
+        card.appendChild(box);
+    }
+    return card;
 }
 
 function escapeHtml(text) {   // React: not needed

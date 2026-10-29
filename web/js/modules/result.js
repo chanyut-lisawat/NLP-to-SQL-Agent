@@ -56,6 +56,18 @@ export function renderResult(env) {
         appendMessage(`<div class="md">${renderMarkdown(env.message)}</div>`, false);
     }
 
+    // 0.5 Layer 2 of the answer (ADR 0010 / #38): the synthesis the agent
+    //     attached to a cause / comparison / trend Turn. Rendered for an empty
+    //     result too — a caveat is often exactly why the rows are empty.
+    const analysis = env.analysis;
+    if (analysis && (analysis.headline
+        || (analysis.findings || []).length
+        || (analysis.caveats || []).length)) {
+        const chatHistory = document.getElementById('chat-history');
+        chatHistory.appendChild(buildAnalysis(analysis));
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+    }
+
     // 1. The generated SQL stays in a chat bubble.
     let sqlHtml = `<strong>Generated SQL:</strong><pre><code class="language-sql">${escapeHtml(env.sql)}</code></pre>`;
     if (env.retry_count > 0) {
@@ -124,6 +136,57 @@ export function renderResult(env) {
 }
 
 /* ---------- pieces ---------- */
+
+/**
+ * The analysis block: what the executed queries jointly show, and — the part a
+ * Consumer must not drop — what the data cannot show. Text is set with
+ * textContent: it is model output and carries no markup.
+ */
+function buildAnalysis(analysis) {
+    const card = document.createElement('div');
+    card.className = 'analysis-card';
+
+    if (analysis.headline) {
+        const headline = document.createElement('div');
+        headline.className = 'analysis-headline';
+        headline.textContent = analysis.headline;
+        card.appendChild(headline);
+    }
+
+    const findings = analysis.findings || [];
+    if (findings.length) {
+        const list = document.createElement('ul');
+        list.className = 'analysis-findings';
+        for (const finding of findings) {
+            const item = document.createElement('li');
+            item.textContent = finding;
+            list.appendChild(item);
+        }
+        card.appendChild(list);
+    }
+
+    const caveats = analysis.caveats || [];
+    if (caveats.length) {
+        const block = document.createElement('div');
+        block.className = 'analysis-caveats';
+
+        const title = document.createElement('div');
+        title.className = 'analysis-caveats-title';
+        title.textContent = '⚠️ ข้อจำกัดของข้อมูล';
+        block.appendChild(title);
+
+        const list = document.createElement('ul');
+        for (const caveat of caveats) {
+            const item = document.createElement('li');
+            item.textContent = caveat;
+            list.appendChild(item);
+        }
+        block.appendChild(list);
+        card.appendChild(block);
+    }
+
+    return card;
+}
 
 function buildSummaryBar(env) {
     const bar = document.createElement('div');

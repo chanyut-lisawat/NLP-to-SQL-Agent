@@ -383,6 +383,9 @@ async function sendMessage() {
                 answer_type: data.answer_type || 'result',
                 sql: (data.answer_type || 'result') === 'result' ? data.sql : null,
                 row_count: data.row_count || 0,
+                // ADR 0010 / #34: replay the deterministic digest so a
+                // follow-up knows each Turn's tables and population.
+                digest: data.turn_digest ?? null,
             });
             toggleResetBtn(false);
             // Refresh history if open
