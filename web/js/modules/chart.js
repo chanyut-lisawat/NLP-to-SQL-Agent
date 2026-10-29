@@ -215,15 +215,23 @@ function rampedBars(values, t) {
     const min = Math.min(...values);
     const max = Math.max(...values);
     const maxIdx = values.indexOf(max);
-    return values.map((v, i) => ({
-        value: v,
-        itemStyle: {
-            // A lone measure gets intensity, not decoration: the ramp is item
-            // opacity over the theme's series colour (ADR 0015).
+    return values.map((v, i) => {
+        // A lone measure gets intensity, not decoration: the ramp is item
+        // opacity over the theme's series colour (ADR 0015).
+        const style = {
             color: max > min && i === maxIdx ? t.accent : t.series,
             opacity: max === min ? 0.75 : 0.45 + 0.55 * ((v - min) / (max - min)),
-        },
-    }));
+        };
+        return {
+            value: v,
+            itemStyle: style,
+            // ECharts 5.6 re-enters emphasis on every pointer move and drops a
+            // style that lives only on the data item, blanking the bar under the
+            // cursor. Restating it in the item's emphasis keeps the drawing (the
+            // same reset the line/area branches needed).
+            emphasis: { itemStyle: { ...style } },
+        };
+    });
 }
 
 /**
@@ -598,7 +606,12 @@ export function renderChart(chartId, config, data, columns) {
             data: stats.map((s) => [s.min, s.q1, s.median, s.q3, s.max]),
             boxWidth: ['15%', '45%'],
             itemStyle: { color: t.fill, borderColor: t.series, borderWidth: 2 },
-            emphasis: { itemStyle: { borderColor: t.accent, borderWidth: 2 } },
+            // Restated in full: an emphasis that only names the border makes
+            // ECharts 5.6 drop the inherited box fill on hover, so the boxes go
+            // blank while the cursor is over the chart.
+            emphasis: {
+                itemStyle: { color: t.fill, borderColor: t.accent, borderWidth: 2 },
+            },
         }];
     } else {
         // Cartesian: the bar family, line/area, or the combo's dual axis.
