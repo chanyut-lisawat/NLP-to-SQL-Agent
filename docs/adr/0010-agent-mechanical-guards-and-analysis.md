@@ -44,7 +44,10 @@ knowledge and the shape it lacks:
 
 - Envelope and `PriorTurn` gain optional fields; the NestJS Consumer must pass
   `digest` back (`docs/INTEGRATION.md` updated with ticket 1).
-- Regression fixtures are real multi-turn conversations from the query log
-  (`eval/`), starting with the Oct 2026 Bangkok/Nakhon Pathom case.
+- Multi-turn regression coverage lives in the unit suite
+  (`tests/unit/test_agent_loop.py`), with a scripted history per scenario. A
+  standalone replay fixture of the Oct 2026 Bangkok/Nakhon Pathom conversation
+  under `eval/` was considered and descoped, not built; adding one later is
+  additive rather than a prerequisite for this decision.
 - `AGENT_STEP_BUDGET` stays 8 by default; the guards, not a larger budget, bound
   the loop.
