@@ -37,3 +37,8 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+# Bare `pytest` must collect the suite only; scripts/ holds ad-hoc verification
+# scripts whose import-time side effects break the tests when collected.
+testpaths = ["tests"]
