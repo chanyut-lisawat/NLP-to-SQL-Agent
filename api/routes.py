@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from api.schemas import (
     QueryRequest, QueryResponse, QueryError, ResultSummary, AnswerAnalysis,
@@ -312,7 +312,6 @@ async def query_data_stream(
         state.db_engine.dialect.name, state.db_engine.dialect.name
     )
     start_time = time.time()
-    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
     def on_event(payload: dict) -> None:

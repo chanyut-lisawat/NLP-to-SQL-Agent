@@ -194,7 +194,6 @@ class TestWarmEngine(_SetupBase):
     def test_real_engine_warm_builds_schema_state(self):
         """NLPEngine.warm fills the schema cache + RAG + text cache off any
         question — verified with stubbed heavy pieces."""
-        engine = deps.state_manager.nlp_engine or object()
         # Build a minimal real NLPEngine-like target: patch the module-level
         # heavy functions the warm routine uses.
         from core.services import engine as engine_mod

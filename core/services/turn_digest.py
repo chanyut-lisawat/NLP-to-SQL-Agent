@@ -10,7 +10,7 @@ with the envelope and sends back inside `history`.
 Pure function; never raises — a digest that cannot be built is simply absent.
 """
 
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import sqlglot
 from sqlglot import exp

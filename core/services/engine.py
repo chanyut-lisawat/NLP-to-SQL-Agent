@@ -2,7 +2,6 @@ import time
 import pandas as pd
 import asyncio
 from types import SimpleNamespace
-from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from sqlalchemy.engine import Engine

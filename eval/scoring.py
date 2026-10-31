@@ -9,8 +9,6 @@ Ticket #17:
   enforced — ADR 0007 decision #1)
 """
 
-import sys
-from collections import Counter
 
 from eval.distribution_audit import (
     AMBIGUOUS_QUOTA,

@@ -13,7 +13,6 @@ from typing import List, Dict, Optional, Any
 import logging
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 
 from core.utils.common import generate_stable_id
 from core.utils.embedding import load_sentence_transformer

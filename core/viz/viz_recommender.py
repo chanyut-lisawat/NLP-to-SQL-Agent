@@ -31,7 +31,6 @@ def detect_series_column(df: pd.DataFrame, x_col: Optional[str], y_col: Optional
     if df.empty or not x_col:
         return None
     
-    columns = [c.lower() for c in df.columns]
     x_lower = x_col.lower()
     
     # Define term lists

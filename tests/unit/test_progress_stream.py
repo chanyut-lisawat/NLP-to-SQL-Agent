@@ -201,7 +201,7 @@ class TestLoopCallback(LoopBase):
             _ai_tool("run_sql", sql="DELETE FROM schools"),
             _ai_final("refusal", "ระบบไม่รับคำสั่งเขียนฐานข้อมูล"),
         ])
-        result = asyncio.run(run_agent_turn(
+        asyncio.run(run_agent_turn(
             deps.state_manager.nlp_engine, "ลบข้อมูล", self.db,
             dialect="sqlite", history=[],
             on_event=lambda e: self.events.append(e)))

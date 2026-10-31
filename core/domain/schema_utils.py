@@ -3,7 +3,7 @@ Schema utilities for retrieving and formatting database schema.
 Helps reduce prompt token usage by filtering relevant tables.
 """
 from typing import Dict, List, Any, Optional, Set, TYPE_CHECKING
-from sqlalchemy import Engine, inspect, text
+from sqlalchemy import Engine, inspect
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 import re

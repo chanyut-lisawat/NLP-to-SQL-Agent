@@ -2,7 +2,7 @@
 Database Migration Helper - ย้ายข้อมูลระหว่าง database engines
 """
 import pandas as pd
-from sqlalchemy import create_engine, MetaData, Table, inspect
+from sqlalchemy import create_engine, MetaData, inspect
 from sqlalchemy.engine import Engine
 from typing import List, Dict, Optional
 import logging

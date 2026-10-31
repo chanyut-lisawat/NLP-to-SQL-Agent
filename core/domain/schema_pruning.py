@@ -74,7 +74,7 @@ class SchemaPruner(nn.Module):
         γ_ji = softmax_j (x_si W^h_sq)(x_qj W^h_sk)^T / √(d/H)
         x̃_si = (⊕^H_{h=1} Σ_j γ^h_ji x_qj W^h_sv) W_so
         """
-        batch_size, num_schema = schema_emb.size(0), schema_emb.size(0)
+        num_schema = schema_emb.size(0)
         num_question = question_emb.size(0)
 
         # Project to query, key, value
@@ -258,7 +258,7 @@ class SchemaMapper:
                     "type": "column",
                     "name": column.name
                 })
-        except:
+        except Exception:
             pass
 
         return entities

@@ -25,7 +25,7 @@ class ConnectionManager:
             
             engine = create_engine(db_path)
             # Test connection
-            with engine.connect() as conn:
+            with engine.connect():
                 pass
             return engine, None
         except Exception as e:

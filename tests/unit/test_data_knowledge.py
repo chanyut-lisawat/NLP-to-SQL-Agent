@@ -1,6 +1,5 @@
 """describe_table / sample_values helpers and the STS notes file (ADR 0010, #37)."""
 
-import json
 import os
 import sys
 import unittest

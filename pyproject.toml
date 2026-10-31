@@ -42,3 +42,17 @@ package = false
 # Bare `pytest` must collect the suite only; scripts/ holds ad-hoc verification
 # scripts whose import-time side effects break the tests when collected.
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+# The lint gate covers the service, its evaluation and its tests. scripts/ and
+# examples/ are one-off developer utilities, not shipped code.
+extend-exclude = ["scripts", "examples"]
+
+[tool.ruff.lint]
+# Defect-catching core rules: syntax errors, undefined names, duplicate
+# definitions, unused imports/variables. Style rules stay off on purpose —
+# E501 fights the long SQL strings, and E402 is unavoidable where a test sets
+# environment variables before importing the app.
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E501", "E402"]

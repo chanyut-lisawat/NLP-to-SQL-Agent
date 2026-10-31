@@ -107,8 +107,6 @@ class DialectTranspiler:
             mysql_only = {"IFNULL", "UNIX_TIMESTAMP", "DATE_FORMAT"}
             # PostgreSQL-specific functions
             postgres_only = {"EXTRACT", "DATE_PART", "TO_CHAR"}
-            # SQLite-specific functions
-            sqlite_only = {"STRFTIME", "JULIANDAY"}
 
             if dialect == "PostgreSQL" and any(f in mysql_only for f in functions):
                 issues.append("Contains MySQL-specific functions")

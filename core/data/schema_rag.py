@@ -8,7 +8,7 @@ with Thai-English mapping support for improved Local LLM accuracy.
 import asyncio
 import hashlib
 import threading
-from typing import List, Dict, Optional, Any, Set
+from typing import List, Dict, Optional, Set
 import logging
 from sentence_transformers import SentenceTransformer
 import chromadb
@@ -296,7 +296,6 @@ class SchemaRAG:
             Set of table names from mapping
         """
         mapped_tables: Set[str] = set()
-        question_lower = question.lower()
         
         for thai_word, english_terms in self.thai_mappings.items():
             if thai_word in question:

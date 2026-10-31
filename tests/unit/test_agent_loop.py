@@ -33,7 +33,6 @@ from core.services import agent
 from core.profiles import load_hints
 from core.services.agent import (
     STEP_BUDGET_EXCEEDED,
-    AgentTurnResult,
     run_agent_turn,
 )
 

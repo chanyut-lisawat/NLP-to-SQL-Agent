@@ -6,7 +6,7 @@ across the codebase.
 """
 
 import hashlib
-from typing import List, Any
+from typing import Any
 
 
 def generate_stable_id(*args: Any) -> str:

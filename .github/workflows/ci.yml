@@ -53,8 +53,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install linters
-        run: pip install ruff
+        run: pip install ruff==0.17.3
 
       - name: Run Ruff (linter)
-        run: ruff check . --ignore E501,F401 --exit-zero
-        # exit-zero: Don't fail CI on lint warnings for now
+        run: ruff check .

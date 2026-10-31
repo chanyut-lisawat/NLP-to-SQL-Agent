@@ -8,7 +8,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'
 
 from core.utils.common import format_timestamp, normalize_sql_code
 from core.domain.sql_safety import validate_and_sanitize_sql
-from core.services.engine import NLPEngine
 
 class TestCommonUtils(unittest.TestCase):
     
