@@ -48,5 +48,5 @@ example's SQL, so it is checked by result equivalence like any other question.
 
 Known gap, not decided here: the quota gate audits `data/corpus/
 TEXT_TO_SQL_STS_RAG_EXAMPLES.json` (62 examples), while the engine retrieves from
-`profiles/sts/examples.json` (69). Post-freeze examples live only in the latter, so the
+`profiles/sts/examples.json` (71). Post-freeze examples live only in the latter, so the
 Example-set quota does not cover them.

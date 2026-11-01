@@ -35,10 +35,13 @@ Envelope shape:
 }
 ```
 
-`error.code` is a closed set: `LLM_FAILED` (no SQL produced), `EXEC_FAILED` (SQL
-produced but rejected by PostgreSQL or by the safety validator). A valid query that
-returns no rows is `status: "ok"` with `row_count: 0` and `error: null` — an empty
-result is a normal answer, not an error.
+`error.code` is a closed set: `LLM_FAILED` (no SQL produced), `SQL_INVALID`
+(reserved for deterministic SQL-validation failures), `EXEC_FAILED` (SQL produced
+but rejected by the datasource or by the safety validator), and
+`STEP_BUDGET_EXCEEDED` (the agent loop used all 8 steps without a final answer;
+ADR 0006). A valid query that returns no rows is `status: "ok"` with
+`row_count: 0` and `error: null` — an empty result is a normal answer, not an
+error.
 
 ## Why
 

@@ -25,8 +25,8 @@ and accuracy claims depend on.
 
 1. **One service instance answers against exactly one Datasource**, fixed at
    deploy time by `DATABASE_URL`. Multiple datasources mean multiple deployments,
-   each with its own connection and `DOMAIN_PROFILE` — not runtime switching and
-   not a `/connect` endpoint.
+   each with its own connection and `DOMAIN_PROFILE` — no runtime switching
+   outside the demo carve-out in ADR 0013, and no `/connect` endpoint.
 2. **Datasource portability goes through Domain profiles** (`profiles/<name>/`).
    The Example set, prompt hints, Thai schema mappings and `describe_table`
    notes are the only domain-specific inputs. A new database is a new profile
@@ -53,15 +53,21 @@ and accuracy claims depend on.
 
 ## Consequences
 
-- `README.md` must state the one-datasource constraint and list supported
-  profiles; it must not advertise `/connect` or multi-database switching.
+- `README.md` must state the one-datasource constraint for the service and
+  list supported profiles; it must not advertise `/connect` or service-side
+  datasource switching. Demo-only switching is documented separately (ADR 0013).
 - A new datasource is complete only when its profile passes the profile
   conformance tests and an evaluation run. Copying the loader files is not
   enough; see `docs/guides/PROFILES.md`.
-- The read-only role, schema cache and RAG stores stay keyed to one datasource,
-  which is what makes the safety and accuracy claims checkable.
-- **Known debt:** STS assumptions still live in core code — the denylist table
-  names in `core/domain/schema_utils.py` and the Thai domain examples in
-  `core/services/agent.py`. They must move into the profile (or a generic hook)
-  when the second real datasource lands. They are recorded here rather than
-  refactored speculatively.
+- In **service mode** the read-only role, schema cache and RAG stores stay
+  keyed to one datasource, which is what makes the safety and accuracy claims
+  checkable. The demo is the deliberate exception (ADR 0013): its local,
+  unauthenticated process may switch Datasource and profile at runtime, and
+  schema-RAG collections are namespaced per Datasource so two databases never
+  share one index.
+- **Known debt (partially discharged):** the Thai domain examples that lived in
+  `core/services/agent.py` moved into `profiles/sts/hints.md` with ADR 0014.
+  The denylist table names in `core/domain/schema_utils.py` still encode STS
+  assumptions; they must move into the profile (or a generic hook) when the
+  second real datasource lands. They are recorded here rather than refactored
+  speculatively.

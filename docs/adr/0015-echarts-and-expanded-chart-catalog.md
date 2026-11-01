@@ -63,3 +63,23 @@ is a modern, legible look and a wider catalog of chart kinds.
   in the docs do.
 - ECharts adds roughly a megabyte of CDN JavaScript to the demo page; the page
   already depends on CDN assets and has no bundler, so nothing else moves.
+
+## Amendment (Nov 2026): the shipped catalog
+
+`CHART_KINDS` shipped with 14 chart kinds (16 keys including `table` / `none`), and
+two entries in the decision above did not become separate keys:
+
+- **`doughnut` is `pie`.** The renderer draws `pie` with an inner radius
+  (`radius: ['45%', '70%']` in `web/js/modules/chart.js`), so it is a doughnut on
+  screen without a second key; `docs/API.md` documents it as "pie (drawn as a
+  doughnut)".
+- **`bubble` was not shipped.** `VizConfig` carries `x_col`, `y_col`, `y2_col` (the
+  combo's second measure) and `series_col` (categorical grouping), but no size or
+  weight role, so a scatter cannot carry the third measure a bubble encodes. Adding
+  it later needs a contract field for the size column and a renderer mapping, not
+  just another key.
+
+The rest of the promised catalog shipped: the bar family (including horizontal,
+grouped, stacked and stacked-100%), line, area, combo, scatter, heatmap, treemap,
+histogram and boxplot. `CHART_KINDS` and `docs/API.md` are authoritative for
+Consumers; changing the catalog belongs in a new ADR or a revision of this one.

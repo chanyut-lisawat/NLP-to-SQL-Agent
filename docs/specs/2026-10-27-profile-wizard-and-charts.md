@@ -84,7 +84,7 @@ justify from the result grid.
 22. As an end user, I want value labels, sensible ordering and quiet gridlines, so
     that I do not have to hover to understand a chart.
 23. As an end user, I want more chart kinds — horizontal, grouped and stacked bars,
-    area, combo bar-with-line, doughnut, scatter and bubble, heatmap, treemap, and
+    area, combo bar-with-line, pie drawn as a doughnut, scatter, heatmap, treemap, and
     distribution views when the result is raw rows — so that a result is drawn the way
     it should be read.
 24. As an end user, I want the chart switcher to offer only kinds the current result
@@ -165,13 +165,16 @@ justify from the result grid.
   becomes a sized element the renderer can fill.
 - Catalog (service-side, rule-based over the result grid): vertical bar, horizontal
   bar, grouped bar, stacked bar, stacked-100% bar, line, area, combo (bar + line, dual
-  axis), doughnut, scatter, bubble, heatmap (two category dimensions × one measure),
-  treemap; histogram and boxplot only when the result carries raw numeric rows rather
-  than an already-aggregated measure. `table` remains the honest fallback and ADR
-  0008's axis policy is unchanged and still enforced as an exit guard.
+  axis), pie drawn as a doughnut, scatter, heatmap (two category dimensions × one
+  measure), treemap; histogram and boxplot only when the result carries raw numeric
+  rows rather than an already-aggregated measure. `table` remains the honest fallback
+  and ADR 0008's axis policy is unchanged and still enforced as an exit guard. The
+  shipped set is 14 chart kinds plus `table` / `none`: `pie` supplies the doughnut
+  rendering, and bubble is not offered because the visualization config has no size
+  role for its third measure (ADR 0015 amendment).
 - Single-series charts use a sequential value ramp with the maximum highlighted;
-  category-distinct colors remain where color carries identity (multi-series,
-  doughnut). Both themes are supported.
+  category-distinct colors remain where color carries identity (multi-series, pie).
+  Both themes are supported.
 - Readability defaults: value labels on bars, ordering taken from the recommendation,
   quiet gridlines and axis lines, preserved top-N + "other" folding, Thai label
   truncation with full text in the tooltip.
